@@ -2,6 +2,92 @@
 
 Automated system to generate personalized marketing maturity assessment presentations from Google Sheets survey data.
 
+## Process Flow
+
+### High-Level Workflow
+
+```mermaid
+flowchart TD
+    A[Google Sheet<br/>Survey Data] --> B[Load & Parse Data]
+    B --> C[Calculate Category Scores]
+    C --> D[Generate AI Recommendations]
+    D --> E[Create PowerPoint Presentations]
+    E --> F{Presentation<br/>Already Exists?}
+    F -->|Yes| G[Skip Client]
+    F -->|No| H[Save to output/]
+    H --> I[Next Client]
+    G --> I
+    I --> J{More Clients?}
+    J -->|Yes| C
+    J -->|No| K[Complete]
+    
+    style A fill:#e1f5ff
+    style K fill:#d4edda
+    style D fill:#fff3cd
+    style E fill:#f8d7da
+```
+
+### Detailed Data Processing Flow
+
+```mermaid
+flowchart LR
+    subgraph Input["📥 Input"]
+        GS[Google Sheet<br/>Client Responses]
+        TEMPLATE[PowerPoint Template]
+    end
+    
+    subgraph Processing["⚙️ Processing"]
+        LOAD[Load Data<br/>via CSV Export]
+        CLEAN[Clean Column Names<br/>& Map Questions]
+        SCORE[Calculate Category Scores<br/>Average per Topic]
+        AI[OpenAI API<br/>Generate Recommendations]
+    end
+    
+    subgraph Output["📤 Output"]
+        PPT[PowerPoint Presentation<br/>Per Client]
+        CHECK{File Exists?}
+        SAVE[Save to output/]
+        SKIP[Skip]
+    end
+    
+    GS --> LOAD
+    LOAD --> CLEAN
+    CLEAN --> SCORE
+    SCORE --> AI
+    TEMPLATE --> PPT
+    AI --> PPT
+    PPT --> CHECK
+    CHECK -->|No| SAVE
+    CHECK -->|Yes| SKIP
+    
+    style GS fill:#e1f5ff
+    style TEMPLATE fill:#e1f5ff
+    style AI fill:#fff3cd
+    style SAVE fill:#d4edda
+    style SKIP fill:#f8d7da
+```
+
+### GitHub Actions Automation Flow
+
+```mermaid
+flowchart TD
+    START[Workflow Triggered<br/>Daily at 9 AM UTC] --> CHECKOUT[Checkout Repository]
+    CHECKOUT --> SETUP[Set Up Python Environment]
+    SETUP --> INSTALL[Install Dependencies]
+    INSTALL --> RUN[Run maturity_assessment.py]
+    RUN --> LOAD_DATA[Load Google Sheet Data]
+    LOAD_DATA --> PROCESS[Process Each Client]
+    PROCESS --> GEN[Generate Presentations]
+    GEN --> UPLOAD[Upload Artifacts]
+    UPLOAD --> END[Workflow Complete]
+    
+    style START fill:#e1f5ff
+    style RUN fill:#fff3cd
+    style GEN fill:#f8d7da
+    style UPLOAD fill:#d4edda
+    style END fill:#d4edda
+```
+
 ## Features
 
 - 📊 Loads survey data directly from Google Sheets
