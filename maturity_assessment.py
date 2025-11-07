@@ -27,24 +27,6 @@ from datetime import datetime
 from pptx import Presentation
 from pptx.util import Pt
 
-# SharePoint imports (optional)
-try:
-    from office365.sharepoint.client_context import ClientContext
-    from office365.runtime.auth.user_credential import UserCredential
-    SHAREPOINT_AVAILABLE = True
-except ImportError:
-    try:
-        # Fallback to older import
-        from office365.sharepoint.client_context import ClientContext
-        from office365.runtime.auth.authentication_context import AuthenticationContext
-        SHAREPOINT_AVAILABLE = True
-        USE_LEGACY_AUTH = True
-    except ImportError:
-        SHAREPOINT_AVAILABLE = False
-        USE_LEGACY_AUTH = False
-else:
-    USE_LEGACY_AUTH = False
-
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -54,14 +36,6 @@ GID = '491555971'
 SHEET_URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}'
 TEMPLATE_PATH = 'Maturity_Slide_Template.pptx'
 OUTPUT_DIR = 'output'
-
-# SharePoint configuration
-SHAREPOINT_SITE_URL = 'https://indigitalmarketing.sharepoint.com/sites/team'
-SHAREPOINT_FOLDER_PATH = '/Drive/Team/Shaz/Client_Maturity_Automation'
-SHAREPOINT_UPLOAD_ENABLED = os.environ.get('SHAREPOINT_UPLOAD', 'false').lower() == 'true'
-
-# SharePoint authentication method: 'user' (username/password) or 'app' (client ID/secret)
-SHAREPOINT_AUTH_METHOD = os.environ.get('SHAREPOINT_AUTH_METHOD', 'user').lower()
 
 # Initialize OpenAI client
 try:
@@ -366,157 +340,6 @@ def email_to_filename(email):
     return f"{safe_email}_Maturity_Assessment.pptx"
 
 
-def upload_to_sharepoint(file_path, filename):
-    """
-    Upload a file to SharePoint folder (only if it doesn't already exist)
-
-    Parameters:
-    - file_path: Local path to the file
-    - filename: Name for the file in SharePoint
-    
-    Returns:
-    - True if successful, False otherwise
-    """
-    if not SHAREPOINT_UPLOAD_ENABLED:
-        return False
-    
-    if not SHAREPOINT_AVAILABLE:
-        print(f"    ⚠️  SharePoint library not available. Install with: pip install Office365-REST-Python-Client")
-        return False
-    
-    try:
-        # Authenticate based on method
-        print(f"      Authenticating to SharePoint...")
-        
-        if SHAREPOINT_AUTH_METHOD == 'app':
-            # App-based authentication (recommended for modern SharePoint)
-            client_id = os.environ.get('SHAREPOINT_CLIENT_ID')
-            client_secret = os.environ.get('SHAREPOINT_CLIENT_SECRET')
-            tenant_id = os.environ.get('SHAREPOINT_TENANT_ID', 'common')
-            
-            if not client_id or not client_secret:
-                print(f"    ⚠️  App credentials not set (SHAREPOINT_CLIENT_ID, SHAREPOINT_CLIENT_SECRET)")
-                print(f"    Set SHAREPOINT_AUTH_METHOD=app and provide app credentials")
-                return False
-            
-            try:
-                from office365.runtime.auth.client_credential import ClientCredential
-                credentials = ClientCredential(client_id, client_secret)
-                ctx = ClientContext(SHAREPOINT_SITE_URL).with_credentials(credentials)
-                
-                # Test connection
-                print(f"      Testing connection...")
-                web = ctx.web
-                ctx.load(web)
-                ctx.execute_query()
-                print(f"      ✓ App-based authentication successful")
-            except Exception as app_error:
-                error_msg = str(app_error)
-                print(f"      ❌ App-based authentication failed: {app_error}")
-                
-                # Provide helpful guidance for common errors
-                if "403" in error_msg or "forbidden" in error_msg.lower():
-                    print(f"      ⚠️  403 Forbidden - Permission issue:")
-                    print(f"         - Make sure you're using APPLICATION permissions (not Delegated)")
-                    print(f"         - Grant 'Sites.ReadWrite.All' as APPLICATION permission")
-                    print(f"         - Admin consent must be granted")
-                    print(f"         - The app needs access to the SharePoint site")
-                elif "401" in error_msg or "unauthorized" in error_msg.lower():
-                    print(f"      ⚠️  Check your Client ID and Client Secret")
-                elif "invalid" in error_msg.lower() or "client" in error_msg.lower():
-                    print(f"      ⚠️  Invalid credentials - verify Client ID and Secret")
-                
-                return False
-                
-        else:
-            # Username/password authentication
-            username = os.environ.get('SHAREPOINT_USERNAME')
-            password = os.environ.get('SHAREPOINT_PASSWORD')
-            
-            if not username or not password:
-                print(f"    ⚠️  SharePoint credentials not set (SHAREPOINT_USERNAME, SHAREPOINT_PASSWORD)")
-                return False
-            
-            try:
-                from office365.runtime.auth.user_credential import UserCredential
-                credentials = UserCredential(username, password)
-                ctx = ClientContext(SHAREPOINT_SITE_URL).with_credentials(credentials)
-                
-                # Test the connection
-                print(f"      Testing connection...")
-                web = ctx.web
-                ctx.load(web)
-                ctx.execute_query()
-                print(f"      ✓ User authentication successful")
-                
-            except Exception as auth_error:
-                error_msg = str(auth_error)
-                print(f"      ❌ SharePoint authentication/connection failed")
-                print(f"      Error: {error_msg}")
-                
-                # Provide helpful guidance
-                if "binary security token" in error_msg.lower() or "extSTS" in error_msg:
-                    print(f"      ⚠️  This error means legacy auth is not supported.")
-                    print(f"      Solution: Use app-based authentication instead:")
-                    print(f"        1. Register an app in Azure AD")
-                    print(f"        2. Set SHAREPOINT_AUTH_METHOD=app")
-                    print(f"        3. Set SHAREPOINT_CLIENT_ID and SHAREPOINT_CLIENT_SECRET")
-                elif "401" in error_msg or "unauthorized" in error_msg.lower():
-                    print(f"      ⚠️  Check your username and password")
-                elif "403" in error_msg or "forbidden" in error_msg.lower():
-                    print(f"      ⚠️  Account may not have permission to access this site")
-                
-                return False
-        
-    except Exception as e:
-        print(f"    ⚠️  SharePoint setup error: {e}")
-        return False
-    
-    # Get the folder
-    folder = ctx.web.get_folder_by_server_relative_url(SHAREPOINT_FOLDER_PATH)
-    
-    # Check if file already exists in SharePoint
-    try:
-        print(f"      Checking if file exists in SharePoint...")
-        files = folder.files
-        ctx.load(files)
-        ctx.execute_query()
-        
-        # Check if file with this name already exists
-        file_exists = any(f.properties['Name'] == filename for f in files)
-        
-        if file_exists:
-            print(f"      ⊘ File already exists in SharePoint - skipping upload")
-            return True  # Return True since file is already there
-        
-        print(f"      ✓ File not found in SharePoint - will upload")
-        
-    except Exception as check_error:
-        # If we can't check, proceed with upload anyway
-        print(f"      ⚠️  Could not check if file exists: {check_error}")
-        print(f"      → Proceeding with upload anyway")
-    
-    # Read file content
-    try:
-        print(f"      Reading file...")
-        file_size = os.path.getsize(file_path)
-        print(f"      File size: {file_size / 1024:.1f} KB")
-        
-        with open(file_path, 'rb') as file_content:
-            file_data = file_content.read()
-        
-        # Upload file
-        print(f"      Uploading to SharePoint...")
-        uploaded_file = folder.upload_file(filename, file_data).execute_query()
-        
-        print(f"      ✓ Successfully uploaded to SharePoint: {filename}")
-        return True
-        
-    except Exception as e:
-        print(f"    ⚠️  SharePoint upload error: {e}")
-        return False
-
-
 def generate_client_presentation(client_email, client_scores, client_responses, 
                                   COLUMN_NAME_MAPPING, CLEANED_TO_ORIGINAL_COL,
                                   QUESTION_CATEGORIES, output_filename):
@@ -694,47 +517,6 @@ def main():
         if skipped_files:
             print(f"⊘ Skipped {len(skipped_files)} existing presentations")
         print(f"Saved to: {OUTPUT_DIR}/")
-        
-        # Upload all files to SharePoint at the end (separate step)
-        if SHAREPOINT_UPLOAD_ENABLED:
-            print(f"\n{'='*60}")
-            print("SharePoint Upload Process")
-            print(f"{'='*60}")
-            
-            # Get all .pptx files in output directory (both new and existing)
-            all_output_files = []
-            if os.path.exists(OUTPUT_DIR):
-                for file in os.listdir(OUTPUT_DIR):
-                    if file.endswith('.pptx') and not file.startswith('~$'):  # Exclude temp files
-                        file_path = os.path.join(OUTPUT_DIR, file)
-                        all_output_files.append(file_path)
-            
-            if not all_output_files:
-                print("  No presentation files found in output directory")
-            else:
-                print(f"  Found {len(all_output_files)} presentation file(s) to check/upload")
-                uploaded_count = 0
-                skipped_count = 0
-                failed_count = 0
-                
-                for file_path in all_output_files:
-                    filename = os.path.basename(file_path)
-                    print(f"\n  Checking: {filename}")
-                    
-                    result = upload_to_sharepoint(file_path, filename)
-                    if result:
-                        # Check the message to see if it was uploaded or skipped
-                        # (The function prints the status, so we track based on that)
-                        uploaded_count += 1
-                    else:
-                        failed_count += 1
-                
-                print(f"\n  SharePoint Summary:")
-                print(f"    ✓ Processed: {uploaded_count} files")
-                if failed_count > 0:
-                    print(f"    ❌ Failed: {failed_count} files")
-        else:
-            print(f"\n  SharePoint upload disabled (set SHAREPOINT_UPLOAD=true to enable)")
         
         print(f"\n{'='*60}")
         print(f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
