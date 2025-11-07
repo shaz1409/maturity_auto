@@ -189,6 +189,46 @@ def find_text_boxes(slide):
     return elements
 
 
+def clean_text_for_presentation(text):
+    """Clean markdown and formatting from text to make it presentable in PowerPoint"""
+    if not text:
+        return text
+    
+    # Remove markdown bold/italic
+    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'\1', text)  # Remove ***bold***
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Remove **bold**
+    text = re.sub(r'\*(.*?)\*', r'\1', text)  # Remove *italic*
+    text = re.sub(r'_(.*?)_', r'\1', text)  # Remove _italic_
+    
+    # Remove markdown headers
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)  # Remove # headers
+    
+    # Remove markdown links but keep text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [text](url) -> text
+    
+    # Remove markdown code blocks
+    text = re.sub(r'```[^`]*```', '', text)  # Remove ```code blocks```
+    text = re.sub(r'`([^`]+)`', r'\1', text)  # Remove `inline code`
+    
+    # Remove common AI prefixes/suffixes
+    text = re.sub(r'^(Here are|Here\'s|Based on|To improve|Recommendations?:)\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\.{2,}', '.', text)  # Multiple dots to single
+    
+    # Remove extra whitespace and clean up
+    text = re.sub(r'\s+', ' ', text)  # Multiple spaces to single
+    text = re.sub(r'\n\s*\n', '\n', text)  # Multiple newlines to single
+    text = text.strip()
+    
+    # Ensure proper sentence capitalization (first letter uppercase)
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    
+    # Remove trailing punctuation issues
+    text = re.sub(r'[\.]{2,}$', '.', text)  # Multiple trailing dots to single
+    
+    return text
+
+
 def generate_recommendations(category, score, questions_in_category, client_responses, original_questions_dict):
     """Generate recommendations using OpenAI"""
     # Identify low-scoring questions
@@ -279,14 +319,16 @@ Make each recommendation specific, actionable, and directly related to the quest
         if "SUMMARY:" in result:
             parts = result.split("RECOMMENDATIONS:")
             summary = parts[0].replace("SUMMARY:", "").strip()
+            summary = clean_text_for_presentation(summary)  # Clean summary
             recommendations_text = parts[1] if len(parts) > 1 else ""
 
             recommendations = []
             for line in recommendations_text.split('\n'):
                 line = line.strip()
-                if line and (line[0].isdigit() or line.startswith('-')):
-                    rec = line.split('.', 1)[-1].strip() if '.' in line else line.lstrip('- ').strip()
-                    if rec:
+                if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
+                    rec = line.split('.', 1)[-1].strip() if '.' in line else line.lstrip('- • ').strip()
+                    rec = clean_text_for_presentation(rec)  # Clean markdown formatting
+                    if rec and len(rec) > 10:
                         recommendations.append(rec)
 
             while len(recommendations) < 4:
@@ -297,6 +339,8 @@ Make each recommendation specific, actionable, and directly related to the quest
             lines = result.split('\n')
             summary = lines[0][:200] if lines else "Summary generated"
             recommendations = [line.strip() for line in lines[1:] if line.strip() and len(line.strip()) > 10][:4]
+            # Clean each recommendation
+            recommendations = [clean_text_for_presentation(rec) for rec in recommendations]
             while len(recommendations) < 4:
                 recommendations.append("Continue improving in this area.")
             return summary, recommendations
@@ -391,7 +435,9 @@ def generate_client_presentation(client_email, client_scores, client_responses,
 
         # Update recommendations with smaller font to fit on slide
         if elements['recommendations']:
-            recommendations_text = "\n\n".join([f"{i+1}. {rec}" for i, rec in enumerate(recommendations)])
+            # Clean each recommendation one more time to ensure no markdown
+            cleaned_recommendations = [clean_text_for_presentation(rec) for rec in recommendations]
+            recommendations_text = "\n\n".join([f"{i+1}. {rec}" for i, rec in enumerate(cleaned_recommendations)])
             if hasattr(elements['recommendations'], 'text_frame'):
                 text_frame = elements['recommendations'].text_frame
                 text_frame.clear()
