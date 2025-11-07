@@ -15,4 +15,7 @@ output/
 *.pptx
 !Maturity_Slide_Template.pptx
 survey_data.csv
+# Temp PowerPoint files
+~$*.pptx
+~$*.ppt
 

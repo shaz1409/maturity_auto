@@ -18,18 +18,82 @@ Automated system to generate personalized marketing maturity assessment presenta
 pip install -r requirements.txt
 ```
 
-### 2. Set OpenAI API Key
+### 2. Set Environment Variables
 
-Set your OpenAI API key as an environment variable:
+#### OpenAI API Key (Required)
 
 ```bash
 export OPENAI_API_KEY='your-api-key-here'
 ```
 
-Or add it to your `~/.zshrc` (or `~/.bashrc`) for persistence:
+#### SharePoint Authentication (Optional - for automatic upload)
+
+**Option A: App-Based Authentication (Recommended for Automation)**
+
+This is the most reliable method for automated scripts. One-time setup:
+
+1. Register an app in Azure AD:
+   - Go to https://portal.azure.com
+   - Navigate to **Azure Active Directory** → **App registrations**
+   - Click **New registration**
+   - Name: `Maturity Assessment Automation`
+   - Supported account types: **Accounts in this organizational directory only**
+   - Click **Register**
+
+2. Create a client secret:
+   - In your app, go to **Certificates & secrets**
+   - Click **New client secret**
+   - Description: `Maturity Assessment Script`
+   - Expires: **24 months** (or your preference)
+   - Click **Add** and **copy the secret value** (you won't see it again!)
+
+3. Grant SharePoint permissions:
+   - Go to **API permissions** → **Add a permission**
+   - Select **Microsoft Graph** → **Application permissions** (⚠️ NOT Delegated)
+   - Search for: `Sites.ReadWrite.All`
+   - Check the box and click **Add permissions**
+   - Click **Grant admin consent** (if you have permission)
+   - ⚠️ **Important**: Application permissions are required for app-based auth
+
+4. Set environment variables:
+   ```bash
+   export SHAREPOINT_UPLOAD=true
+   export SHAREPOINT_AUTH_METHOD=app
+   export SHAREPOINT_CLIENT_ID='your-client-id-from-azure'
+   export SHAREPOINT_CLIENT_SECRET='your-client-secret-value'
+   ```
+
+**Option B: App Password (Quick Fix - if MFA is enabled)**
+
+If your account has MFA enabled, you can use an app password:
+
+1. Create an app password:
+   - Go to https://account.microsoft.com/security
+   - Under **App passwords**, create a new one
+   - Copy the generated password
+
+2. Set environment variables:
+   ```bash
+   export SHAREPOINT_UPLOAD=true
+   export SHAREPOINT_AUTH_METHOD=user
+   export SHAREPOINT_USERNAME='your-email@domain.com'
+   export SHAREPOINT_PASSWORD='your-app-password-here'
+   ```
+
+**Make Environment Variables Persistent**
+
+Add to your `~/.zshrc` (or `~/.bashrc`) for persistence:
 
 ```bash
+# OpenAI
 echo "export OPENAI_API_KEY='your-api-key-here'" >> ~/.zshrc
+
+# SharePoint (App-based - recommended)
+echo "export SHAREPOINT_UPLOAD=true" >> ~/.zshrc
+echo "export SHAREPOINT_AUTH_METHOD=app" >> ~/.zshrc
+echo "export SHAREPOINT_CLIENT_ID='your-client-id'" >> ~/.zshrc
+echo "export SHAREPOINT_CLIENT_SECRET='your-client-secret'" >> ~/.zshrc
+
 source ~/.zshrc
 ```
 
@@ -81,6 +145,14 @@ Generated PowerPoint presentations will be saved in the `output/` directory with
     <dict>
         <key>OPENAI_API_KEY</key>
         <string>your-api-key-here</string>
+        <key>SHAREPOINT_UPLOAD</key>
+        <string>true</string>
+        <key>SHAREPOINT_AUTH_METHOD</key>
+        <string>app</string>
+        <key>SHAREPOINT_CLIENT_ID</key>
+        <string>your-client-id</string>
+        <key>SHAREPOINT_CLIENT_SECRET</key>
+        <string>your-client-secret</string>
     </dict>
     <key>StartCalendarInterval</key>
     <dict>
