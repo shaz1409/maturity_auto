@@ -59,6 +59,34 @@ Generated PowerPoint presentations will be saved in the `output/` directory with
 
 ## Scheduling
 
+### GitHub Actions (Recommended)
+
+Automatically run the script daily using GitHub Actions:
+
+1. **Set up the secret:**
+   - Go to your repository on GitHub
+   - Click **Settings** → **Secrets and variables** → **Actions**
+   - Click **New repository secret**
+   - Name: `OPENAI_API_KEY`
+   - Value: Your OpenAI API key
+   - Click **Add secret**
+
+2. **The workflow is already configured:**
+   - The workflow file is at `.github/workflows/daily-assessment.yml`
+   - It runs daily at 9:00 AM UTC
+   - You can manually trigger it from the **Actions** tab
+
+3. **Access generated files:**
+   - Go to the **Actions** tab after a run completes
+   - Click on the latest run
+   - Download the `maturity-assessments` artifact to get all generated presentations
+
+4. **Adjust schedule (optional):**
+   - Edit `.github/workflows/daily-assessment.yml`
+   - Change the cron schedule: `'0 9 * * *'` (9 AM UTC daily)
+   - Cron format: `minute hour day month day-of-week`
+   - Example: `'0 14 * * *'` = 2 PM UTC daily
+
 ### macOS (using launchd)
 
 1. Create a plist file at `~/Library/LaunchAgents/com.maturity.assessment.plist`:

@@ -1,0 +1,51 @@
+name: Daily Maturity Assessment
+
+on:
+  schedule:
+    # Run daily at 9:00 AM UTC (adjust timezone as needed)
+    - cron: '0 9 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-assessments:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run maturity assessment
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python maturity_assessment.py
+    
+    - name: Upload generated presentations
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: maturity-assessments
+        path: output/*.pptx
+        retention-days: 30
+    
+    - name: Commit and push output files (optional)
+      if: success()
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add output/*.pptx || true
+        git diff --staged --quiet || git commit -m "Auto-generated assessments $(date +'%Y-%m-%d')"
+        git push || echo "No changes to commit"
+      continue-on-error: true
+
