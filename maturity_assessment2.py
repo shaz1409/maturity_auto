@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marketing Maturity Assessment Automation
+Marketing Maturity Assessment Automation (Configurable Version)
 
 Automated script to:
 1. Load survey data from Google Sheets
@@ -9,7 +9,7 @@ Automated script to:
 4. Create personalized PowerPoint presentations
 
 Usage:
-    python maturity_assessment.py
+    python maturity_assessment2.py
 
 Environment Variables:
     OPENAI_API_KEY: Your OpenAI API key (required)
@@ -30,12 +30,114 @@ from pptx.util import Pt
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuration
+# ============================================================================
+# CONFIGURATION - Modify these to adapt to different scenarios
+# ============================================================================
+
+# Google Sheet Configuration
 SHEET_ID = '1tHWUJWJl_zTwGRTg21qbW_5qpYH8bBMFYZYbIZ03eO8'
 GID = '491555971'
 SHEET_URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}'
+
+# File Paths
 TEMPLATE_PATH = 'Maturity_Slide_Template.pptx'
 OUTPUT_DIR = 'output'
+
+# Column Configuration
+# Columns to exclude from question processing
+EXCLUDED_COLUMNS = ['Timestamp', 'Email Address']
+
+# Category Mappings - Define which questions belong to which categories
+# Format: 'Category Name': (start_index, end_index) - zero-indexed, end_index is exclusive
+# This maps question positions to categories
+CATEGORY_QUESTION_RANGES = {
+    'Tech & Data': (0, 5),                    # Questions 0-4 (first 5 questions)
+    'Campaigning & Assets': (5, 11),           # Questions 5-10 (next 6 questions)
+    'Segmentation & Personalisation': (11, 14),  # Questions 11-13 (next 3 questions)
+    'Reporting & Insights': (14, 20),         # Questions 14-19 (next 6 questions)
+    'People & Operations': (20, 24)           # Questions 20-23 (last 4 questions)
+}
+
+# Slide Category Mapping - Maps slide titles in template to category names
+SLIDE_CATEGORY_MAPPING = {
+    'Tech and Data': 'Tech & Data',
+    'Campaigning & Assets': 'Campaigning & Assets',
+    'Segmentation & Personalisation': 'Segmentation & Personalisation',
+    'Reporting & Insights': 'Reporting & Insights',
+    'People & Operations': 'People & Operations'
+}
+
+# Maturity Level Thresholds
+MATURITY_THRESHOLDS = {
+    'not mature': 1.5,
+    'developing': 2.5,
+    'mature': 3.5,
+    'very mature': 4.0
+}
+
+# Score Configuration
+MIN_SCORE = 1
+MAX_SCORE = 4
+LOW_SCORE_THRESHOLD = 2  # Questions scoring <= this are considered "low scoring"
+
+# OpenAI Configuration
+OPENAI_MODEL = "gpt-4o-mini"
+OPENAI_TEMPERATURE = 0.7
+OPENAI_MAX_TOKENS = 500
+OPENAI_SYSTEM_MESSAGE = "You are an expert CRM marketing consultant providing actionable recommendations."
+
+# Recommendation Prompt Template
+# Use {placeholders} for dynamic values that will be filled in
+RECOMMENDATION_PROMPT_TEMPLATE = """You are a CRM marketing maturity consultant. Generate recommendations for a client.
+
+Category: {category}
+Overall Maturity Score: {score:.2f}/4.0 ({maturity_level})
+
+Client's responses to all questions in this category:
+{questions_detail}
+{focus_areas}
+
+Instructions:
+1. Generate a brief 2-3 sentence summary of their current maturity level in this category
+2. Generate four specific, actionable recommendations that:
+- PRIORITIZE addressing the low-scoring areas identified above
+- Reference the specific questions where they scored low (1-2 out of 4)
+- Provide concrete, actionable steps based on the question context
+- Are tailored to their current maturity level
+
+Focus especially on the questions where they scored 1-2, as these are the areas needing the most improvement.
+
+Format the response as:
+SUMMARY: [your summary here]
+RECOMMENDATIONS:
+1. [recommendation 1 - should address a specific low-scoring question]
+2. [recommendation 2 - should address a specific low-scoring question]
+3. [recommendation 3 - can address another area or build on improvements]
+4. [recommendation 4 - can address another area or build on improvements]
+
+Make each recommendation specific, actionable, and directly related to the questions they answered poorly."""
+
+# Text Box Finding Configuration
+SCORE_TEXT_BOX_KEYWORDS = ["Your score"]
+RECOMMENDATIONS_TEXT_BOX_KEYWORDS = ["Recommendation 1"]
+
+# Font Size Configuration
+FONT_SIZE_OPTIONS = [12, 11, 10, 9, 8, 7]  # Try from largest to smallest
+MIN_FONT_SIZE = 7
+PARAGRAPH_SPACING_PT = 3  # Spacing between recommendation paragraphs
+
+# Error Messages
+ERROR_RECOMMENDATIONS = [
+    "SPEAK TO SHAZ",
+    "Recommendation 1: Review current processes",
+    "Recommendation 2: Identify improvement areas",
+    "Recommendation 3: Implement best practices",
+    "Recommendation 4: Monitor progress"
+]
+
+# ============================================================================
+# END OF CONFIGURATION
+# ============================================================================
 
 # Initialize OpenAI client
 try:
@@ -74,7 +176,7 @@ def load_data():
 
 
 def setup_mappings(df):
-    """Set up column name mappings and question categories"""
+    """Set up column name mappings and question categories using top-level configuration"""
     # Create column name mappings
     COLUMN_NAME_MAPPING = {}
     CLEANED_TO_ORIGINAL = {}
@@ -84,18 +186,14 @@ def setup_mappings(df):
         COLUMN_NAME_MAPPING[col] = cleaned
         CLEANED_TO_ORIGINAL[cleaned] = col
 
-    # Get question columns in order
-    question_columns = [col for col in df.columns if col not in ['Timestamp', 'Email Address']]
+    # Get question columns in order (excluding configured columns)
+    question_columns = [col for col in df.columns if col not in EXCLUDED_COLUMNS]
     cleaned_questions = [COLUMN_NAME_MAPPING[q] for q in question_columns]
 
-    # Define question categories
-    QUESTION_CATEGORIES = {
-        'Tech & Data': cleaned_questions[0:5],
-        'Campaigning & Assets': cleaned_questions[5:11],
-        'Segmentation & Personalisation': cleaned_questions[11:14],
-        'Reporting & Insights': cleaned_questions[14:20],
-        'People & Operations': cleaned_questions[20:24]
-    }
+    # Build question categories using CATEGORY_QUESTION_RANGES configuration
+    QUESTION_CATEGORIES = {}
+    for category, (start_idx, end_idx) in CATEGORY_QUESTION_RANGES.items():
+        QUESTION_CATEGORIES[category] = cleaned_questions[start_idx:end_idx]
 
     # Create reverse mapping
     QUESTION_TO_CATEGORY = {}
@@ -126,7 +224,7 @@ def calculate_category_scores(client_row, question_categories, cleaned_to_origin
                 if value is not None and pd.notna(value):
                     try:
                         num_value = float(value)
-                        if 1 <= num_value <= 4:
+                        if MIN_SCORE <= num_value <= MAX_SCORE:
                             category_scores.append(num_value)
                     except (ValueError, TypeError):
                         pass
@@ -148,13 +246,15 @@ def find_text_boxes(slide):
         'line': None
     }
 
-    # Find text boxes
+    # Find text boxes using configured keywords
     for shape in slide.shapes:
         if hasattr(shape, "text"):
             text = shape.text.strip()
-            if "Your score" in text and elements['score'] is None:
+            # Check for score text box
+            if any(keyword in text for keyword in SCORE_TEXT_BOX_KEYWORDS) and elements['score'] is None:
                 elements['score'] = shape
-            elif "Recommendation 1" in text and elements['recommendations'] is None:
+            # Check for recommendations text box
+            elif any(keyword in text for keyword in RECOMMENDATIONS_TEXT_BOX_KEYWORDS) and elements['recommendations'] is None:
                 elements['recommendations'] = shape
 
     # Find line and circle
@@ -232,33 +332,25 @@ def clean_text_for_presentation(text):
 def fit_text_to_textbox(paragraphs_list, shape):
     """Calculate optimal font size to fit text in text box"""
     # Get shape dimensions in points (1 EMU = 1/914400 inch, 1 inch = 72 points)
-    # shape.height and shape.width are in EMU (English Metric Units)
     shape_height_pt = (shape.height / 914400) * 72
     shape_width_pt = (shape.width / 914400) * 72
-    
-    # Start with a reasonable font size and work down
-    font_sizes = [12, 11, 10, 9, 8, 7]  # Try from 12pt down to 7pt
-    min_font_size = 7
     
     # Combine all text for estimation
     total_text = '\n\n'.join(paragraphs_list)
     total_chars = len(total_text)
     
-    for font_size in font_sizes:
-        # Estimate characters per line (rough: font_size * 0.6 pixels per char, but use points)
-        # Average character width is roughly 0.6 * font_size in points
+    for font_size in FONT_SIZE_OPTIONS:
+        # Estimate characters per line
         chars_per_line = max(10, int(shape_width_pt / (font_size * 0.6)))
         
         # Estimate number of lines needed
-        # Account for explicit newlines in the text
         explicit_lines = total_text.count('\n') + 1
         wrapped_lines = max(1, int(total_chars / chars_per_line))
         estimated_lines = max(explicit_lines, wrapped_lines)
         
         # Calculate estimated height needed
-        # Line height is typically 1.2-1.5x font size, use 1.3x
         line_height_pt = font_size * 1.3
-        paragraph_spacing_pt = (len(paragraphs_list) - 1) * 3  # 3pt between paragraphs
+        paragraph_spacing_pt = (len(paragraphs_list) - 1) * PARAGRAPH_SPACING_PT
         estimated_height_pt = (estimated_lines * line_height_pt) + paragraph_spacing_pt
         
         # If it fits (with 10% margin for safety), use this font size
@@ -266,11 +358,23 @@ def fit_text_to_textbox(paragraphs_list, shape):
             return font_size
     
     # If nothing fits, return minimum size
-    return min_font_size
+    return MIN_FONT_SIZE
+
+
+def determine_maturity_level(score):
+    """Determine maturity level based on configured thresholds"""
+    if score <= MATURITY_THRESHOLDS['not mature']:
+        return "not mature"
+    elif score <= MATURITY_THRESHOLDS['developing']:
+        return "developing"
+    elif score <= MATURITY_THRESHOLDS['mature']:
+        return "mature"
+    else:
+        return "very mature"
 
 
 def generate_recommendations(category, score, questions_in_category, client_responses, original_questions_dict):
-    """Generate recommendations using OpenAI"""
+    """Generate recommendations using OpenAI with configurable prompt template"""
     # Identify low-scoring questions
     low_scoring_questions = []
     all_questions_context = []
@@ -286,72 +390,45 @@ def generate_recommendations(category, score, questions_in_category, client_resp
             }
             all_questions_context.append(question_info)
 
-            if q_score <= 2:
+            if q_score <= LOW_SCORE_THRESHOLD:
                 low_scoring_questions.append(question_info)
 
     low_scoring_questions.sort(key=lambda x: x['score'])
     all_questions_context.sort(key=lambda x: x['score'])
 
     questions_detail = "\n".join([
-        f"- Question: {q['original']}\n  Score: {q['score']}/4"
+        f"- Question: {q['original']}\n  Score: {q['score']}/{MAX_SCORE}"
         for q in all_questions_context
     ])
 
     focus_areas = ""
     if low_scoring_questions:
         focus_areas = "\n\nAreas requiring immediate attention (low scores):\n" + "\n".join([
-            f"- {q['original']} (Score: {q['score']}/4)"
+            f"- {q['original']} (Score: {q['score']}/{MAX_SCORE})"
             for q in low_scoring_questions[:3]
         ])
 
-    # Determine maturity level
-    if score <= 1.5:
-        maturity_level = "not mature"
-    elif score <= 2.5:
-        maturity_level = "developing"
-    elif score <= 3.5:
-        maturity_level = "mature"
-    else:
-        maturity_level = "very mature"
+    # Determine maturity level using configured thresholds
+    maturity_level = determine_maturity_level(score)
 
-    prompt = f"""You are a CRM marketing maturity consultant. Generate recommendations for a client.
-
-        Category: {category}
-        Overall Maturity Score: {score:.2f}/4.0 ({maturity_level})
-
-        Client's responses to all questions in this category:
-        {questions_detail}
-        {focus_areas}
-
-        Instructions:
-        1. Generate a brief 2-3 sentence summary of their current maturity level in this category
-        2. Generate four specific, actionable recommendations that:
-        - PRIORITIZE addressing the low-scoring areas identified above
-        - Reference the specific questions where they scored low (1-2 out of 4)
-        - Provide concrete, actionable steps based on the question context
-        - Are tailored to their current maturity level
-
-        Focus especially on the questions where they scored 1-2, as these are the areas needing the most improvement.
-
-        Format the response as:
-        SUMMARY: [your summary here]
-        RECOMMENDATIONS:
-        1. [recommendation 1 - should address a specific low-scoring question]
-        2. [recommendation 2 - should address a specific low-scoring question]
-        3. [recommendation 3 - can address another area or build on improvements]
-        4. [recommendation 4 - can address another area or build on improvements]
-
-        Make each recommendation specific, actionable, and directly related to the questions they answered poorly."""
+    # Build prompt using template
+    prompt = RECOMMENDATION_PROMPT_TEMPLATE.format(
+        category=category,
+        score=score,
+        maturity_level=maturity_level,
+        questions_detail=questions_detail,
+        focus_areas=focus_areas
+    )
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are an expert CRM marketing consultant providing actionable recommendations."},
+                {"role": "system", "content": OPENAI_SYSTEM_MESSAGE},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=500
+            temperature=OPENAI_TEMPERATURE,
+            max_tokens=OPENAI_MAX_TOKENS
         )
 
         result = response.choices[0].message.content
@@ -359,7 +436,7 @@ def generate_recommendations(category, score, questions_in_category, client_resp
         if "SUMMARY:" in result:
             parts = result.split("RECOMMENDATIONS:")
             summary = parts[0].replace("SUMMARY:", "").strip()
-            summary = clean_text_for_presentation(summary) # Clean summary
+            summary = clean_text_for_presentation(summary)
             recommendations_text = parts[1] if len(parts) > 1 else ""
 
             recommendations = []
@@ -367,7 +444,7 @@ def generate_recommendations(category, score, questions_in_category, client_resp
                 line = line.strip()
                 if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
                     rec = line.split('.', 1)[-1].strip() if '.' in line else line.lstrip('- • ').strip()
-                    rec = clean_text_for_presentation(rec)  # Clean markdown formatting
+                    rec = clean_text_for_presentation(rec)
                     if rec and len(rec) > 10:
                         recommendations.append(rec)
 
@@ -379,7 +456,6 @@ def generate_recommendations(category, score, questions_in_category, client_resp
             lines = result.split('\n')
             summary = lines[0][:200] if lines else "Summary generated"
             recommendations = [line.strip() for line in lines[1:] if line.strip() and len(line.strip()) > 10][:4]
-            # Clean each recommendation
             recommendations = [clean_text_for_presentation(rec) for rec in recommendations]
             while len(recommendations) < 4:
                 recommendations.append("Continue improving in this area.")
@@ -387,25 +463,11 @@ def generate_recommendations(category, score, questions_in_category, client_resp
 
     except Exception as e:
         print(f"  ⚠️  Error generating recommendations: {e}")
-        return f"Error: {str(e)}", [
-            "SPEAK TO SHAZ",
-            "Recommendation 1: Review current processes",
-            "Recommendation 2: Identify improvement areas",
-            "Recommendation 3: Implement best practices",
-            "Recommendation 4: Monitor progress"
-        ]
+        return f"Error: {str(e)}", ERROR_RECOMMENDATIONS
 
 
 def map_slides_to_categories(prs):
-    """Map slide titles to category names"""
-    SLIDE_CATEGORY_MAPPING = {
-        'Tech and Data': 'Tech & Data',
-        'Campaigning & Assets': 'Campaigning & Assets',
-        'Segmentation & Personalisation': 'Segmentation & Personalisation',
-        'Reporting & Insights': 'Reporting & Insights',
-        'People & Operations': 'People & Operations'
-    }
-    
+    """Map slide titles to category names using configured mapping"""
     CATEGORY_TO_SLIDE = {}
     for i, slide in enumerate(prs.slides):
         for shape in slide.shapes:
@@ -470,32 +532,22 @@ def generate_client_presentation(client_email, client_scores, client_responses,
             if hasattr(elements['score'], 'text_frame'):
                 elements['score'].text_frame.clear()
                 p = elements['score'].text_frame.paragraphs[0]
-                p.text = f"{score:.2f}/4.0"
+                p.text = f"{score:.2f}/{MAX_SCORE}.0"
             else:
-                elements['score'].text = f"{score:.2f}/4.0"
+                elements['score'].text = f"{score:.2f}/{MAX_SCORE}.0"
 
         # Update recommendations with font size that fits the text box
         if elements['recommendations']:
-            # Clean each recommendation one more time to ensure no markdown
             cleaned_recommendations = [clean_text_for_presentation(rec) for rec in recommendations]
             recommendations_text = "\n\n".join([f"{i+1}. {rec}" for i, rec in enumerate(cleaned_recommendations)])
             if hasattr(elements['recommendations'], 'text_frame'):
                 text_frame = elements['recommendations'].text_frame
                 text_frame.clear()
-                
-                # Enable word wrap
                 text_frame.word_wrap = True
                 
-                # Split by double newlines to create paragraphs for each recommendation
                 paragraphs = recommendations_text.split("\n\n")
+                optimal_font_size = fit_text_to_textbox(paragraphs, elements['recommendations'])
                 
-                # Calculate optimal font size to fit the text box
-                # elements['recommendations'] is the shape from the template
-                optimal_font_size = fit_text_to_textbox(
-                    paragraphs, elements['recommendations']
-                )
-                
-                # Add paragraphs with the optimal font size
                 for i, para_text in enumerate(paragraphs):
                     if i > 0:
                         p = text_frame.add_paragraph()
@@ -503,12 +555,10 @@ def generate_client_presentation(client_email, client_scores, client_responses,
                         p = text_frame.paragraphs[0]
                     
                     p.text = para_text
-                    p.space_after = Pt(3)  # Small spacing between recommendations
+                    p.space_after = Pt(PARAGRAPH_SPACING_PT)
                     
-                    # Set font size to fit the text box
                     for run in p.runs:
                         run.font.size = Pt(optimal_font_size)
-                
             else:
                 elements['recommendations'].text = recommendations_text
 
@@ -521,7 +571,7 @@ def generate_client_presentation(client_email, client_scores, client_responses,
                 line_top = line.top
                 line_height = line.height
 
-                score_position = score / 4.0
+                score_position = score / MAX_SCORE
                 circle_x = line_left + (line_width * score_position)
                 circle_y = line_top + (line_height / 2)
 
@@ -545,20 +595,16 @@ def main():
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
-    # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     try:
-        # Load data
         df = load_data()
         
-        # Setup mappings
         print("\nSetting up mappings...")
         (COLUMN_NAME_MAPPING, CLEANED_TO_ORIGINAL_COL, QUESTION_CATEGORIES,
          QUESTION_TO_CATEGORY, question_columns) = setup_mappings(df)
         print(f"✓ Mapped {len(QUESTION_CATEGORIES)} categories")
         
-        # Calculate scores for all clients
         print("\nCalculating category scores...")
         category_scores_list = []
         
@@ -571,7 +617,6 @@ def main():
         scores_df = pd.DataFrame(category_scores_list)
         print(f"✓ Calculated scores for {len(scores_df)} clients")
         
-        # Generate presentations
         print(f"\nGenerating presentations...")
         generated_files = []
         skipped_files = []
@@ -588,7 +633,6 @@ def main():
             filename = email_to_filename(client_email)
             output_filename = os.path.join(OUTPUT_DIR, filename)
             
-            # Check if presentation already exists
             if os.path.exists(output_filename):
                 print(f"\n  Skipping: {client_email} (presentation already exists)")
                 skipped_files.append(output_filename)
@@ -625,3 +669,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
